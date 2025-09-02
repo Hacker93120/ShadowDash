@@ -83,9 +83,22 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
     private var playerVelocityX = 0f
     private val moveSpeed = 8f
     
+    // Dash system
+    private var isDashing = false
+    private var dashTimer = 0f
+    private val dashDuration = 0.3f
+    private var dashCooldown = 0f
+    private val dashCooldownTime = 2f
+    private val dashSpeed = 25f
+    
     // Animation
     private var animFrame = 0f
     private var isJumping = false
+    
+    // Juicy animations
+    private var scaleX = 1f
+    private var scaleY = 1f
+    private var landingSquash = 0f
     
     // Player sprite
     private val playerBitmap by lazy {
@@ -188,6 +201,15 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
                     downButton -> { // Descendre plus vite
                         if (velocity < 0) velocity = 5f
                     }
+                    // Zone centrale pour Dash
+                    (touchX >= centerX - 50 && touchX <= centerX + 50 &&
+                     touchY >= centerY - 50 && touchY <= centerY + 50) -> {
+                        if (dashCooldown <= 0 && !isDashing) {
+                            isDashing = true
+                            dashTimer = dashDuration
+                            dashCooldown = dashCooldownTime
+                        }
+                    }
                     else -> { // Tap général pour sauter
                         if (playerY >= groundY - 5) {
                             velocity = jumpForce
@@ -208,6 +230,20 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
     fun update() {
         if (!gameStarted || gameOver) return
 
+        // Dash system
+        if (isDashing) {
+            dashTimer -= 0.016f
+            playerVelocityX = dashSpeed
+            if (dashTimer <= 0) {
+                isDashing = false
+                playerVelocityX = 0f
+            }
+        }
+        
+        if (dashCooldown > 0) {
+            dashCooldown -= 0.016f
+        }
+
         // Mouvement horizontal
         playerX += playerVelocityX
         if (playerX < 0) playerX = 0f
@@ -220,9 +256,25 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         // Animation
         animFrame += 0.3f
         isJumping = velocity < 0
+        
+        // Juicy animations
+        if (isJumping) {
+            scaleX = 0.8f + sin(animFrame * 4) * 0.1f
+            scaleY = 1.2f + sin(animFrame * 4) * 0.1f
+        } else {
+            scaleX = 1f + landingSquash
+            scaleY = 1f - landingSquash
+        }
+        
+        if (landingSquash > 0) {
+            landingSquash -= 0.05f
+        }
 
-        // Sol
+        // Sol avec effet d'atterrissage
         if (playerY > groundY) {
+            if (velocity > 5f) { // Atterrissage dur
+                landingSquash = 0.3f
+            }
             playerY = groundY
             velocity = 0f
             isJumping = false
@@ -246,8 +298,8 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
             val rect = iterator.next()
             rect.offset(-obstacleSpeed, 0f)
 
-            // Collision
-            if (RectF.intersects(rect, RectF(playerX - playerSize/2, playerY - playerSize/2, playerX + playerSize/2, playerY + playerSize/2))) {
+            // Collision (ignorée pendant dash)
+            if (!isDashing && RectF.intersects(rect, RectF(playerX - playerSize/2, playerY - playerSize/2, playerX + playerSize/2, playerY + playerSize/2))) {
                 gameOver = true
                 // Explosion de particules
                 repeat(15) {
@@ -378,8 +430,24 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         canvas.save()
         canvas.translate(playerX, bodyY)
         canvas.rotate(rotation)
+        canvas.scale(scaleX, scaleY) // Animation squash/stretch
         
-        // Dessiner le sprite avec fond transparent
+        // Effet dash
+        if (isDashing) {
+            val dashPaint = Paint().apply {
+                color = Color.CYAN
+                alpha = 100
+                isAntiAlias = true
+            }
+            // Traînée de dash
+            for (i in 1..5) {
+                canvas.drawBitmap(playerBitmap, null, 
+                    RectF(-playerSize/2 - i*10, -playerSize/2, playerSize/2 - i*10, playerSize/2), 
+                    dashPaint.apply { alpha = 100 - i*15 })
+            }
+        }
+        
+        // Dessiner le sprite principal
         val spriteRect = RectF(-playerSize/2, -playerSize/2, playerSize/2, playerSize/2)
         canvas.drawBitmap(playerBitmap, null, spriteRect, null)
         
@@ -443,6 +511,25 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         canvas.drawLine(rightX - 25, rightY, rightX + 25, rightY, arrowPaint)
         canvas.drawLine(rightX + 25, rightY, rightX + 10, rightY - 15, arrowPaint)
         canvas.drawLine(rightX + 25, rightY, rightX + 10, rightY + 15, arrowPaint)
+        
+        // Bouton DASH au centre
+        val dashColor = if (dashCooldown > 0) Color.GRAY else Color.YELLOW
+        val dashPaint = Paint().apply {
+            color = dashColor
+            isAntiAlias = true
+            setShadowLayer(10f, 0f, 0f, Color.YELLOW)
+        }
+        canvas.drawCircle(centerX, centerY, 50f, dashPaint)
+        
+        // Texte "DASH"
+        val dashTextPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            isAntiAlias = true
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("DASH", centerX, centerY + 8, dashTextPaint)
     }
 
     private fun drawParallaxLayer(canvas: Canvas, offset: Float, color: Int, alpha: Float) {
